@@ -1,0 +1,54 @@
+<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
+<idea-plugin>
+    <id>com.yourcompany.tabsperproject</id>
+    <name>Tabs Per Project</name>
+    <vendor>Your Company</vendor>
+
+    <description><![CDATA[
+      Groups open editor tabs by project in a convenient tool window.<br/>
+      <br/>
+      Perfect for developers working with multiple projects, especially Rider users with .NET solutions!<br/>
+      <br/>
+      Features:<br/>
+      • Groups open files by their project/module<br/>
+      • Special support for Rider and .NET solutions<br/>
+      • Smart file naming (shows parent folder for duplicates)<br/>
+      • Customizable project colors<br/>
+      • Configurable sorting options<br/>
+      • Quick file closing functionality<br/>
+      • Tool window position configuration<br/>
+    ]]></description>
+
+    <!-- Product and plugin compatibility requirements -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <resource-bundle>messages.TabsPerProjectBundle</resource-bundle>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow factoryClass="com.thedutchservers.tabsperproject.toolWindow.TabsPerProjectToolWindowFactory"
+                    id="TabsPerProject"
+                    anchor="right"
+                    icon="/icons/tabs-per-project.svg"/>
+        
+        <applicationService serviceImplementation="com.thedutchservers.tabsperproject.settings.TabsPerProjectSettings"/>
+        <applicationConfigurable instance="com.thedutchservers.tabsperproject.settings.TabsPerProjectConfigurable"
+                                 id="TabsPerProject"
+                                 displayName="Tabs Per Project"/>
+        
+        <postStartupActivity implementation="com.thedutchservers.tabsperproject.startup.TabsPerProjectStartupActivity" />
+    </extensions>
+
+    <actions>
+        <action id="TabsPerProject.RefreshTabs"
+                class="com.thedutchservers.tabsperproject.actions.RefreshTabsAction"
+                text="Refresh Tabs"
+                description="Refresh the tabs list"
+                icon="AllIcons.Actions.Refresh"/>
+        
+        <action id="TabsPerProject.CloseFile"
+                class="com.thedutchservers.tabsperproject.actions.CloseFileAction"
+                text="Close File"
+                description="Close the selected file"
+                icon="AllIcons.Actions.Close"/>
+    </actions>
+</idea-plugin>
