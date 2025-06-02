@@ -10,7 +10,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.ui.ColorChooser
+import com.intellij.ui.ColorChooserService
 import com.intellij.ui.JBColor
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.components.JBLabel
@@ -263,13 +263,13 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
         projectLabel.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 if (e.button == MouseEvent.BUTTON1 && e.clickCount == 2) {
-                    val newColor = ColorChooser.chooseColor(
+                    val newColor = ColorChooserService.instance.showDialog(
                         headerPanel,
                         "Choose Project Color",
                         group.color ?: JBColor.BLUE
                     )
                     if (newColor != null) {
-                        TabsPerProjectSettings.getInstance().setProjectColor(project, newColor)
+                        TabsPerProjectSettings.getInstance().setProjectColor(project, newColor as Color?)
                         refreshFileList()
                     }
                 }

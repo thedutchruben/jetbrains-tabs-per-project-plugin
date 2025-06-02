@@ -116,7 +116,7 @@ class TabsPerProjectConfigurable : Configurable {
 
 class TabsPerProjectSettingsComponent {
     val panel: JPanel
-    private val sortOrderCombo = ComboBox(SortOrder.values())
+    private val sortOrderCombo = ComboBox(SortOrder.entries.toTypedArray())
     private val showColorsCheckBox = JBCheckBox(TabsPerProjectBundle.message("settings.showProjectColors"))
     private val hideEditorTabsCheckBox = JBCheckBox(TabsPerProjectBundle.message("settings.hideEditorTabs"))
     private val groupByModuleCheckBox = JBCheckBox(TabsPerProjectBundle.message("settings.groupByModule"))
