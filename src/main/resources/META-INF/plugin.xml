@@ -1,8 +1,8 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <id>com.yourcompany.tabsperproject</id>
+    <id>com.thedutchservers.tabsperproject</id>
     <name>Tabs Per Project</name>
-    <vendor>Your Company</vendor>
+    <vendor>Ruben de Roos</vendor>
 
     <description><![CDATA[
       Groups open editor tabs by project in a convenient tool window.<br/>
