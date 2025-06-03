@@ -18,6 +18,14 @@ This plugin helps you organize your open files by grouping them according to the
 - **Real-time updates**: The file list updates automatically as you open and close files
 - **Active file highlighting**: Currently active file is highlighted with bold text and selection background
 - **Modified file indicators**: Files with unsaved changes show a "*" prefix and green color
+- **Error indicators**: Files with errors display red underlines and error tooltips
+- **Drag and drop reordering**: Reorder files by dragging them to your preferred position
+- **Advanced drag-to-editor**: Drag files directly from tool window to editor area with multiple opening modes:
+  - **Normal drag**: Opens file in current editor tab
+  - **Ctrl+Drag**: Opens file in split view
+  - **Shift+Drag**: Opens file in new detached window
+  - **Alt+Drag**: Opens file without focusing the editor
+- **Custom ordering**: Maintain your preferred file order with the Custom Order sort mode
 - **Hide IDE editor tabs**: Option to hide the IDE's built-in editor tabs when using this plugin
 - **Clean module names**: Automatically cleans up module names (removes file extensions and common prefixes)
 
@@ -27,7 +35,14 @@ This plugin helps you organize your open files by grouping them according to the
 2. Open files from different projects and see them automatically grouped
 3. Double-click a project name to assign a custom color
 4. Click on any file name to switch to it
-5. Use the × button to close individual files or all files in a project
+5. **Drag and drop files** to reorder them (automatically switches to Custom Order mode)
+6. **Drag files to editor area** to open them with advanced options:
+   - **Normal drag**: Opens in current editor
+   - **Ctrl+Drag**: Creates split view
+   - **Shift+Drag**: Opens in new window
+   - **Alt+Drag**: Opens without focus
+7. Files with errors will show red underlines and error tooltips
+8. Use the × button to close individual files or all files in a project
 
 ## Configuration
 
@@ -37,10 +52,12 @@ Access the plugin settings via:
 
 Available settings:
 - Tool window position (left, right, bottom)
-- Sort order (alphabetical, last modified, project then alphabetical, module then alphabetical)
+- Sort order (alphabetical, last modified, project then alphabetical, module then alphabetical, **custom order**)
 - Show/hide project colors
 - Hide IDE editor tabs (use plugin tabs only)
 - Group files by module within projects (enabled by default)
+
+**Note**: The Custom Order sort mode allows you to maintain your preferred file ordering. When you drag and drop files to reorder them, the plugin automatically switches to this mode.
 
 <!-- Plugin description end -->
 

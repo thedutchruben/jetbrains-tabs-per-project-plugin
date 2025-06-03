@@ -23,6 +23,9 @@ class TabsPerProjectSettings : PersistentStateComponent<TabsPerProjectSettings> 
     @MapAnnotation
     var projectColors: MutableMap<String, String> = mutableMapOf()
     
+    @MapAnnotation
+    var fileOrders: MutableMap<String, Int> = mutableMapOf()
+    
     override fun getState(): TabsPerProjectSettings = this
     
     override fun loadState(state: TabsPerProjectSettings) {
@@ -44,6 +47,22 @@ class TabsPerProjectSettings : PersistentStateComponent<TabsPerProjectSettings> 
         } else {
             projectColors[project.name] = String.format("#%06X", color.rgb and 0xFFFFFF)
         }
+    }
+    
+    fun getFileOrder(filePath: String): Int {
+        return fileOrders[filePath] ?: -1
+    }
+    
+    fun setFileOrder(filePath: String, order: Int) {
+        if (order < 0) {
+            fileOrders.remove(filePath)
+        } else {
+            fileOrders[filePath] = order
+        }
+    }
+    
+    fun clearFileOrders() {
+        fileOrders.clear()
     }
     
     companion object {

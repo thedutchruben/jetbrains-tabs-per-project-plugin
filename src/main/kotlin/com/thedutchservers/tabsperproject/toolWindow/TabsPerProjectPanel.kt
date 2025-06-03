@@ -1,8 +1,11 @@
 package com.thedutchservers.tabsperproject.toolWindow
 
 import com.intellij.icons.AllIcons
+import com.intellij.ide.dnd.DnDManager
+import com.intellij.lang.annotation.HighlightSeverity
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.editor.markup.AnalyzerStatus
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
@@ -10,6 +13,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.problems.WolfTheProblemSolver
 import com.intellij.ui.ColorChooserService
 import com.intellij.ui.JBColor
 import com.intellij.ui.ScrollPaneFactory
@@ -19,11 +23,16 @@ import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.thedutchservers.tabsperproject.TabsPerProjectBundle
 import com.thedutchservers.tabsperproject.actions.RefreshTabsAction
+import com.thedutchservers.tabsperproject.dnd.EditorDropHandler
+import com.thedutchservers.tabsperproject.dnd.FileDragSource
 import com.thedutchservers.tabsperproject.model.OpenFileInfo
 import com.thedutchservers.tabsperproject.model.ProjectFileGroup
 import com.thedutchservers.tabsperproject.model.SortOrder
 import com.thedutchservers.tabsperproject.settings.TabsPerProjectSettings
 import java.awt.*
+import java.awt.datatransfer.DataFlavor
+import java.awt.datatransfer.Transferable
+import java.awt.dnd.*
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.*
@@ -31,9 +40,19 @@ import javax.swing.*
 class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(true, true) {
     private val contentPanel = JBPanel<JBPanel<*>>(VerticalFlowLayout(0, 0))
     private val fileGroups = mutableMapOf<Project, ProjectFileGroup>()
+    private var draggedFile: OpenFileInfo? = null
+    private var dropTarget: Component? = null
+    
+    // Drag and drop components
+    private lateinit var fileDragSource: FileDragSource
+    private lateinit var editorDropHandler: EditorDropHandler
+    
+    // Track external drag operations
+    private var isExternalDrag = false
     
     init {
         setupUI()
+        setupDragAndDrop()
         setupListeners()
         refreshFileList()
     }
@@ -45,6 +64,15 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
         
         setContent(scrollPane)
         setupToolbar()
+    }
+    
+    private fun setupDragAndDrop() {
+        // Initialize drag and drop handlers
+        fileDragSource = FileDragSource(project, contentPanel)
+        editorDropHandler = EditorDropHandler(project)
+        
+        // Register the content panel as a drag source with DnDManager
+        DnDManager.getInstance().registerSource(fileDragSource, contentPanel)
     }
     
     private fun setupToolbar() {
@@ -105,6 +133,15 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
                     .getModuleForFile(file)
                 
                 val fileInfo = OpenFileInfo(file, project, module)
+                
+                // Check for errors in the file
+                val wolfTheProblemSolver = WolfTheProblemSolver.getInstance(project)
+                fileInfo.hasErrors = wolfTheProblemSolver.isProblemFile(file)
+                
+                // Load custom order from settings
+                val settings = TabsPerProjectSettings.getInstance()
+                fileInfo.customOrder = settings.getFileOrder(file.path)
+                
                 group.files.add(fileInfo)
                 
                 // Determine the actual project/module name
@@ -170,6 +207,20 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
                     // Also sort within module groups
                     group.moduleGroups.values.forEach { moduleFiles ->
                         moduleFiles.sortBy { it.file.name.lowercase() }
+                    }
+                }
+            }
+            SortOrder.CUSTOM_ORDER -> {
+                fileGroups.values.forEach { group ->
+                    group.files.sortWith(compareBy(
+                        { if (it.customOrder >= 0) it.customOrder else Int.MAX_VALUE },
+                        { it.file.name.lowercase() }
+                    ))
+                    group.moduleGroups.values.forEach { moduleFiles ->
+                        moduleFiles.sortWith(compareBy(
+                            { if (it.customOrder >= 0) it.customOrder else Int.MAX_VALUE },
+                            { it.file.name.lowercase() }
+                        ))
                     }
                 }
             }
@@ -367,11 +418,86 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
             fileLabel.foreground = JBColor(Color(0, 100, 0), Color(100, 200, 100))
         }
         
-        // Make clickable to open file
-        fileLabel.addMouseListener(object : MouseAdapter() {
+        // Add error indicator
+        if (fileInfo.hasErrors) {
+            fileLabel.foreground = JBColor.RED
+            // Add red underline
+            fileLabel.putClientProperty("html.disable", false)
+            val originalText = fileLabel.text
+            fileLabel.text = "<html><u style='color:red;'>$originalText</u></html>"
+            val existingTooltip = fileLabel.toolTipText ?: ""
+            fileLabel.toolTipText = if (existingTooltip.isNotEmpty()) {
+                "$existingTooltip\n${TabsPerProjectBundle.message("tooltip.hasErrors")}"
+            } else {
+                TabsPerProjectBundle.message("tooltip.hasErrors")
+            }
+        }
+        
+        // Make clickable to open file and add drag support
+        val mouseHandler = object : MouseAdapter() {
+            private var dragStartPoint: Point? = null
+            private var isDragging = false
+            private val DRAG_THRESHOLD = 5
+            
             override fun mouseClicked(e: MouseEvent) {
-                if (e.button == MouseEvent.BUTTON1) {
+                if (e.button == MouseEvent.BUTTON1 && !isDragging) {
                     FileEditorManager.getInstance(fileInfo.project).openFile(fileInfo.file, true)
+                }
+            }
+            
+            override fun mousePressed(e: MouseEvent) {
+                if (SwingUtilities.isLeftMouseButton(e)) {
+                    dragStartPoint = e.point
+                    isDragging = false
+                    
+                    // Set up for potential internal reordering
+                    draggedFile = fileInfo
+                    
+                    // Also set up for potential external drag
+                    fileDragSource.setDraggedFile(fileInfo)
+                }
+            }
+            
+            override fun mouseReleased(e: MouseEvent) {
+                if (SwingUtilities.isLeftMouseButton(e)) {
+                    // Handle internal drop if we're over a valid drop target
+                    if (draggedFile != null && draggedFile != fileInfo && dropTarget == filePanel && !isExternalDrag) {
+                        handleFileDrop(draggedFile!!, fileInfo)
+                        filePanel.border = JBUI.Borders.empty(2, leftIndent, 2, 10)
+                    }
+                    
+                    // Clean up drag state
+                    dragStartPoint = null
+                    isDragging = false
+                    draggedFile = null
+                    dropTarget = null
+                    isExternalDrag = false
+                    filePanel.cursor = Cursor.getDefaultCursor()
+                    fileDragSource.setDraggedFile(null)
+                }
+            }
+            
+            override fun mouseDragged(e: MouseEvent) {
+                if (SwingUtilities.isLeftMouseButton(e) && dragStartPoint != null) {
+                    val currentPoint = e.point
+                    val distance = dragStartPoint!!.distance(currentPoint)
+                    
+                    if (distance > DRAG_THRESHOLD && !isDragging) {
+                        isDragging = true
+                        
+                        // Determine if this should be an external or internal drag
+                        val globalPoint = Point(e.xOnScreen, e.yOnScreen)
+                        SwingUtilities.convertPointFromScreen(globalPoint, contentPanel)
+                        
+                        // If dragging significantly outside the tool window, start external drag
+                        val toolWindowBounds = contentPanel.bounds
+                        if (!toolWindowBounds.contains(globalPoint)) {
+                            startExternalDrag(e, fileInfo)
+                        } else {
+                            // Internal drag - show move cursor
+                            filePanel.cursor = Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR)
+                        }
+                    }
                 }
             }
             
@@ -379,11 +505,41 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
                 if (!isActive) {
                     filePanel.background = UIUtil.getListSelectionBackground(false)
                 }
+                // Handle drop target highlighting
+                if (draggedFile != null && draggedFile != fileInfo) {
+                    dropTarget = filePanel
+                    filePanel.border = BorderFactory.createCompoundBorder(
+                        JBUI.Borders.empty(2, leftIndent, 2, 10),
+                        BorderFactory.createLineBorder(JBColor.BLUE, 2)
+                    )
+                }
             }
             
             override fun mouseExited(e: MouseEvent) {
                 if (!isActive) {
                     filePanel.background = UIUtil.getListBackground()
+                }
+                // Remove drop target highlighting
+                if (dropTarget == filePanel) {
+                    filePanel.border = JBUI.Borders.empty(2, leftIndent, 2, 10)
+                    dropTarget = null
+                }
+                filePanel.cursor = Cursor.getDefaultCursor()
+            }
+        }
+        
+        fileLabel.addMouseListener(mouseHandler)
+        fileLabel.addMouseMotionListener(mouseHandler)
+        
+        // Add drop support
+        filePanel.addMouseListener(object : MouseAdapter() {
+            override fun mouseReleased(e: MouseEvent) {
+                if (draggedFile != null && draggedFile != fileInfo && dropTarget == filePanel) {
+                    handleFileDrop(draggedFile!!, fileInfo)
+                    filePanel.border = JBUI.Borders.empty(2, leftIndent, 2, 10)
+                    draggedFile = null
+                    dropTarget = null
+                    filePanel.cursor = Cursor.getDefaultCursor()
                 }
             }
         })
@@ -401,7 +557,101 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
         
         filePanel.add(closeButton, BorderLayout.EAST)
         
+        // Update tooltip to include drag instructions
+        val settings = TabsPerProjectSettings.getInstance()
+        val existingTooltip = fileLabel.toolTipText ?: ""
+        val dragToEditorTooltip = TabsPerProjectBundle.message("tooltip.dragToEditor")
+        
+        fileLabel.toolTipText = if (existingTooltip.isNotEmpty()) {
+            "$existingTooltip\n$dragToEditorTooltip"
+        } else {
+            dragToEditorTooltip
+        }
+        
+        // Add reorder instruction if in custom order mode
+        if (settings.sortOrder == SortOrder.CUSTOM_ORDER) {
+            val reorderTooltip = TabsPerProjectBundle.message("tooltip.dragToReorder")
+            fileLabel.toolTipText = "${fileLabel.toolTipText}\n$reorderTooltip"
+        }
+        
         return filePanel
+    }
+    
+    private fun startExternalDrag(e: MouseEvent, fileInfo: OpenFileInfo) {
+        isExternalDrag = true
+        
+        // Convert mouse event to screen coordinates for global drag operation
+        val globalPoint = Point(e.xOnScreen, e.yOnScreen)
+        
+        try {
+            // Start drag operation using DnDManager
+            val dndManager = DnDManager.getInstance()
+            
+            // The DnDManager will handle the actual drag operation
+            // and call our FileDragSource when needed
+            
+            // Visual feedback
+            contentPanel.cursor = Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR)
+            
+            // Note: The actual drag-and-drop will be handled by the DnDManager
+            // which will use our registered FileDragSource
+            
+        } catch (ex: Exception) {
+            // If external drag fails, fall back to normal behavior
+            isExternalDrag = false
+            FileEditorManager.getInstance(fileInfo.project).openFile(fileInfo.file, true)
+        }
+    }
+    
+    private fun handleFileDrop(draggedFileInfo: OpenFileInfo, targetFileInfo: OpenFileInfo) {
+        val settings = TabsPerProjectSettings.getInstance()
+        
+        // Only handle reordering if we're in custom order mode
+        if (settings.sortOrder != SortOrder.CUSTOM_ORDER) {
+            // Automatically switch to custom order mode
+            settings.sortOrder = SortOrder.CUSTOM_ORDER
+        }
+        
+        // Get all files from the same project/module group
+        val projectFiles = fileGroups[draggedFileInfo.project]?.files ?: return
+        val targetModule = targetFileInfo.module?.name
+        val draggedModule = draggedFileInfo.module?.name
+        
+        // Only allow reordering within the same module group
+        if (targetModule != draggedModule) {
+            return
+        }
+        
+        // Find files in the same group
+        val sameGroupFiles = if (targetModule != null) {
+            fileGroups[draggedFileInfo.project]?.moduleGroups?.get(targetModule) ?: return
+        } else {
+            projectFiles.filter { it.module == null }
+        }
+        
+        // Calculate new order values
+        val draggedIndex = sameGroupFiles.indexOf(draggedFileInfo)
+        val targetIndex = sameGroupFiles.indexOf(targetFileInfo)
+        
+        if (draggedIndex == -1 || targetIndex == -1 || draggedIndex == targetIndex) {
+            return
+        }
+        
+        // Reassign order values for all files in the group
+        val reorderedFiles = sameGroupFiles.toMutableList()
+        reorderedFiles.removeAt(draggedIndex)
+        reorderedFiles.add(if (targetIndex > draggedIndex) targetIndex - 1 else targetIndex, draggedFileInfo)
+        
+        // Update custom order values
+        reorderedFiles.forEachIndexed { index, fileInfo ->
+            fileInfo.customOrder = index
+            settings.setFileOrder(fileInfo.file.path, index)
+        }
+        
+        // Refresh the display
+        ApplicationManager.getApplication().invokeLater {
+            refreshFileList()
+        }
     }
     
     private fun closeAllFilesInProject(project: Project) {
