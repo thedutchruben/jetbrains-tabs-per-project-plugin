@@ -1,10 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 13 13">
   <g fill="none" fill-rule="evenodd">
-    <rect width="11" height="3" x="1" y="1" fill="#6E6E6E" rx="1"/>
-    <rect width="11" height="3" x="1" y="5" fill="#6E6E6E" rx="1"/>
-    <rect width="11" height="3" x="1" y="9" fill="#6E6E6E" rx="1"/>
-    <circle cx="2.5" cy="2.5" r="0.5" fill="#FFF"/>
-    <circle cx="2.5" cy="6.5" r="0.5" fill="#FFF"/>
-    <circle cx="2.5" cy="10.5" r="0.5" fill="#FFF"/>
+    <!-- Project container -->
+    <rect width="12" height="12" x="0.5" y="0.5" fill="none" stroke="#6E6E6E" stroke-width="1" rx="2"/>
+    
+    <!-- Colorful project indicators -->
+    <rect width="2" height="2" x="2" y="2" fill="#4A90E2" rx="0.5"/>
+    <rect width="2" height="2" x="5" y="2" fill="#7ED321" rx="0.5"/>
+    <rect width="2" height="2" x="8" y="2" fill="#F5A623" rx="0.5"/>
+    
+    <!-- File tabs -->
+    <rect width="8" height="1.5" x="2.5" y="5.5" fill="#6E6E6E" rx="0.5"/>
+    <rect width="6" height="1.5" x="2.5" y="7.5" fill="#6E6E6E" rx="0.5"/>
+    <rect width="7" height="1.5" x="2.5" y="9.5" fill="#6E6E6E" rx="0.5"/>
+    
+    <!-- Active indicator -->
+    <circle cx="1.5" cy="6.5" r="1" fill="#4A90E2" opacity="0.3"/>
+    <circle cx="1.5" cy="6.5" r="0.5" fill="#4A90E2"/>
   </g>
 </svg>

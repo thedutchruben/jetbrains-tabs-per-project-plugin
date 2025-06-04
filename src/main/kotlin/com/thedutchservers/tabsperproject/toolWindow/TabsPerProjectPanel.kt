@@ -1,7 +1,6 @@
 package com.thedutchservers.tabsperproject.toolWindow
 
 import com.intellij.icons.AllIcons
-import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
@@ -10,7 +9,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.roots.ProjectRootManager
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.ui.ColorChooserService
+import com.intellij.problems.WolfTheProblemSolver
 import com.intellij.ui.JBColor
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.components.JBLabel
@@ -18,12 +17,15 @@ import com.intellij.ui.components.JBPanel
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.thedutchservers.tabsperproject.TabsPerProjectBundle
-import com.thedutchservers.tabsperproject.actions.RefreshTabsAction
+import com.thedutchservers.tabsperproject.actions.CloseFileAction
 import com.thedutchservers.tabsperproject.model.OpenFileInfo
 import com.thedutchservers.tabsperproject.model.ProjectFileGroup
 import com.thedutchservers.tabsperproject.model.SortOrder
 import com.thedutchservers.tabsperproject.settings.TabsPerProjectSettings
+import io.ktor.client.plugins.cache.storage.FileStorage
 import java.awt.*
+import java.awt.Color
+import java.awt.Graphics
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.*
@@ -44,20 +46,6 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
         scrollPane.verticalScrollBarPolicy = JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED
         
         setContent(scrollPane)
-        setupToolbar()
-    }
-    
-    private fun setupToolbar() {
-        val actionGroup = DefaultActionGroup()
-        actionGroup.add(RefreshTabsAction())
-        
-        val toolbar = ActionManager.getInstance().createActionToolbar(
-            "Tabs per project",
-            actionGroup,
-            true
-        )
-        toolbar.targetComponent = this
-        setToolbar(toolbar.component)
     }
     
     private fun setupListeners() {
@@ -232,56 +220,75 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
     
     private fun createProjectHeader(project: Project, group: ProjectFileGroup): JPanel {
         val headerPanel = JBPanel<JBPanel<*>>(BorderLayout())
-        headerPanel.border = JBUI.Borders.empty(5, 10, 5, 10)
-        headerPanel.background = UIUtil.getPanelBackground()
+        headerPanel.border = JBUI.Borders.empty(8, 2, 8, 5) // Reduced left and right padding
         
-        val titlePanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 5, 0))
+        // Use project color as background if configured
+        val settings = TabsPerProjectSettings.getInstance()
+        val customBackgroundColor = settings.getProjectHeaderBackgroundColor()
+        headerPanel.background = if (customBackgroundColor != null) {
+            // Use custom background color
+            customBackgroundColor
+        } else if (group.color != null) {
+            // Use the project color with moderate opacity for header background
+            Color(group.color!!.red, group.color!!.green, group.color!!.blue, 120)
+        } else {
+            UIUtil.getTreeSelectionBackground(false)
+        }
+        
+        val titlePanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 8, 0))
         titlePanel.isOpaque = false
         
-        // Project color indicator
-        if (TabsPerProjectSettings.getInstance().showProjectColors && group.color != null) {
+        // Project color indicator - smaller since background shows the color
+        if (group.color != null) {
             val colorLabel = JBLabel()
-            colorLabel.preferredSize = Dimension(10, 10)
+            colorLabel.preferredSize = Dimension(8, 8)
             colorLabel.isOpaque = true
             colorLabel.background = group.color
-            colorLabel.border = BorderFactory.createLineBorder(JBColor.GRAY)
+            colorLabel.border = BorderFactory.createLineBorder(JBColor.BLACK, 1)
             titlePanel.add(colorLabel)
         }
         
-        // Project name
-        val projectLabel = JBLabel(project.name)
-        projectLabel.font = projectLabel.font.deriveFont(Font.BOLD)
+        // Project name - apply customizable styling
+        val projectText = settings.projectHeaderTextCase.applyTo(project.name)
+        val projectLabel = JBLabel(projectText)
+        projectLabel.font = projectLabel.font.deriveFont(
+            settings.projectHeaderFontStyle.toAwtStyle(),
+            settings.projectHeaderFontSize.toFloat()
+        )
+        // Use white text on colored backgrounds for better contrast
+        val customTextColor = settings.getProjectHeaderTextColor()
+        projectLabel.foreground = if (customTextColor != null) {
+            // Use custom text color
+            customTextColor
+        } else if ((customBackgroundColor != null) || (group.color != null)) {
+            JBColor.WHITE
+        } else {
+            JBColor.namedColor("Label.foreground", UIUtil.getLabelForeground())
+        }
         projectLabel.toolTipText = TabsPerProjectBundle.message("tooltip.configureColor")
         titlePanel.add(projectLabel)
         
         // File count
         val countLabel = JBLabel("(${group.files.size})")
-        countLabel.foreground = JBColor.GRAY
+        countLabel.foreground = if (customTextColor != null) {
+            customTextColor  // Use same custom text color as project label
+        } else if ((customBackgroundColor != null) || (group.color != null)) {
+            JBColor.WHITE  // White text on colored background
+        } else {
+            JBColor.GRAY
+        }
+        countLabel.font = countLabel.font.deriveFont(Font.BOLD)
         titlePanel.add(countLabel)
-        
-        // Add click listener for color configuration
-        projectLabel.addMouseListener(object : MouseAdapter() {
-            override fun mouseClicked(e: MouseEvent) {
-                if (e.button == MouseEvent.BUTTON1 && e.clickCount == 2) {
-                    val newColor = ColorChooserService.instance.showDialog(
-                        headerPanel,
-                        "Choose Project Color",
-                        group.color ?: JBColor.BLUE
-                    )
-                    if (newColor != null) {
-                        TabsPerProjectSettings.getInstance().setProjectColor(project, newColor as Color?)
-                        refreshFileList()
-                    }
-                }
-            }
-        })
         
         headerPanel.add(titlePanel, BorderLayout.WEST)
         
         // Close all button
-        val closeAllButton = JButton("×")
+        val closeAllButton = JButton(AllIcons.Actions.Close)
         closeAllButton.toolTipText = TabsPerProjectBundle.message("action.closeAll")
         closeAllButton.preferredSize = Dimension(20, 20)
+        closeAllButton.isContentAreaFilled = false
+        closeAllButton.isBorderPainted = false
+        closeAllButton.isFocusPainted = false
         closeAllButton.addActionListener {
             closeAllFilesInProject(project)
         }
@@ -292,26 +299,71 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
     
     private fun createModuleHeader(moduleName: String, fileCount: Int): JPanel {
         val headerPanel = JBPanel<JBPanel<*>>(BorderLayout())
-        headerPanel.border = JBUI.Borders.empty(3, 30, 3, 10)  // Indented more than project
-        headerPanel.background = UIUtil.getPanelBackground()
+        headerPanel.border = JBUI.Borders.empty(5, 25, 5, 5)  // Reduced indentation and right padding
         
-        val titlePanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 5, 0))
+        // Use module color as background if configured
+        val settings = TabsPerProjectSettings.getInstance()
+        val moduleColor = settings.getModuleColor(project, moduleName)
+        val customBackgroundColor = settings.getModuleHeaderBackgroundColor()
+        headerPanel.background = if (customBackgroundColor != null) {
+            // Use custom background color
+            customBackgroundColor
+        } else if (moduleColor != null) {
+            // Use the module color with moderate opacity for header background
+            Color(moduleColor.red, moduleColor.green, moduleColor.blue, 100)
+        } else {
+            UIUtil.getListBackground()
+        }
+        
+        val titlePanel = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 6, 0))
         titlePanel.isOpaque = false
+        
+        // Module color indicator if configured - smaller since background shows color
+        if (moduleColor != null) {
+            val colorLabel = JBLabel()
+            colorLabel.preferredSize = Dimension(6, 6)
+            colorLabel.isOpaque = true
+            colorLabel.background = moduleColor
+            colorLabel.border = BorderFactory.createLineBorder(JBColor.GRAY)
+            titlePanel.add(colorLabel)
+        }
         
         // Module icon
         val moduleIcon = AllIcons.Nodes.Module
         val iconLabel = JBLabel(moduleIcon)
         titlePanel.add(iconLabel)
         
-        // Module name - clean up common patterns for better display
-        val displayName = cleanModuleName(moduleName, project.name)
+        // Module name - apply customizable styling
+        val cleanName = cleanModuleName(moduleName, project.name)
+        val displayName = settings.moduleHeaderTextCase.applyTo(cleanName)
         val moduleLabel = JBLabel(displayName)
-        moduleLabel.font = moduleLabel.font.deriveFont(Font.ITALIC)
+        moduleLabel.font = moduleLabel.font.deriveFont(
+            settings.moduleHeaderFontStyle.toAwtStyle(),
+            settings.moduleHeaderFontSize.toFloat()
+        )
+        // Use white text on colored backgrounds for better contrast
+        val customTextColor = settings.getModuleHeaderTextColor()
+        moduleLabel.foreground = if (customTextColor != null) {
+            // Use custom text color
+            customTextColor
+        } else if ((customBackgroundColor != null) || (moduleColor != null)) {
+            JBColor.WHITE
+        } else {
+            JBColor.namedColor("Component.infoForeground", JBColor.BLUE)
+        }
+        moduleLabel.toolTipText = "Double-click to configure module color"
         titlePanel.add(moduleLabel)
         
         // File count
         val countLabel = JBLabel("($fileCount)")
-        countLabel.foreground = JBColor.GRAY
+        countLabel.foreground = if (customTextColor != null) {
+            customTextColor  // Use same custom text color as module label
+        } else if ((customBackgroundColor != null) || (moduleColor != null)) {
+            JBColor.WHITE  // White text on colored background
+        } else {
+            JBColor.GRAY
+        }
+        countLabel.font = countLabel.font.deriveFont(Font.ITALIC)
         titlePanel.add(countLabel)
         
         headerPanel.add(titlePanel, BorderLayout.WEST)
@@ -321,8 +373,12 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
     
     private fun createFilePanel(fileInfo: OpenFileInfo, indentLevel: Int = 1): JPanel {
         val filePanel = JBPanel<JBPanel<*>>(BorderLayout())
-        val leftIndent = if (indentLevel == 2) 40 else 20
-        filePanel.border = JBUI.Borders.empty(2, leftIndent, 2, 10)
+        val leftIndent = when (indentLevel) {
+            2 -> 45  // Files under modules - reduced from 60
+            1 -> 15  // Files under projects - reduced from 25  
+            else -> 15
+        }
+        filePanel.border = JBUI.Borders.empty(3, leftIndent, 3, 5) // Reduced right padding too
         
         val fileEditorManager = FileEditorManager.getInstance(fileInfo.project)
         val isActive = fileEditorManager.selectedFiles.contains(fileInfo.file)
@@ -331,7 +387,15 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
                             editor.isModified
                         }
         
-        // Set background based on file state
+        // Check for file errors - with safety checks
+        val hasErrors = try {
+            !fileInfo.project.isDisposed && 
+            WolfTheProblemSolver.getInstance(fileInfo.project).isProblemFile(fileInfo.file)
+        } catch (e: Exception) {
+            false // Fallback to no errors if detection fails
+        }
+        
+        // Set background color - simple list background for files
         filePanel.background = when {
             isActive -> UIUtil.getListSelectionBackground(true)
             else -> UIUtil.getListBackground()
@@ -342,36 +406,73 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
             group.files.count { it.file.name == fileInfo.file.name } > 1
         }
         
+        // File icon based on file type
+        val fileIcon = fileInfo.file.fileType.icon ?: AllIcons.FileTypes.Text
+        
         // File name label with state indicators
         val fileName = buildString {
-            if (isModified) append("* ")
+            // Add status indicators
+            when {
+                hasErrors -> append("⚠ ")  // Warning triangle for errors
+                isModified -> append("• ")  // Bullet point for unsaved changes
+                else -> append("  ")  // Consistent spacing
+            }
+            
             if (needsParentFolder && fileInfo.file.parent != null) {
                 append(fileInfo.file.parent.name)
                 append("/")
             }
             append(fileInfo.file.name)
         }
-        val fileLabel = JBLabel(fileName)
-        fileLabel.toolTipText = buildString {
+        
+        val filePanel_inner = JBPanel<JBPanel<*>>(FlowLayout(FlowLayout.LEFT, 4, 0))
+        filePanel_inner.isOpaque = false
+        
+        // File type icon
+        val iconLabel = JBLabel(fileIcon)
+        filePanel_inner.add(iconLabel)
+        
+        // Set up text and tooltip
+        val fullText = fileName
+        val fullTooltipText = buildString {
             append(fileInfo.file.path)
             if (isActive) append(" [Active]")
-            if (isModified) append(" [Modified]")
+            if (isModified) append(" [Unsaved Changes]")
+            if (hasErrors) append(" [Has Errors]")
         }
+        
+        val fileLabel = TruncatingLabel(fullText, fullTooltipText)
         fileLabel.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
         
-        // Apply styling based on state
-        if (isActive) {
-            fileLabel.font = fileLabel.font.deriveFont(Font.BOLD)
-        }
-        if (isModified) {
-            fileLabel.foreground = JBColor(Color(0, 100, 0), Color(100, 200, 100))
+        // Apply styling based on state - more subtle than headers
+        when {
+            hasErrors -> {
+                fileLabel.font = fileLabel.font.deriveFont(Font.BOLD)
+                fileLabel.foreground = JBColor(Color(180, 0, 0), Color(255, 100, 100)) // Red for errors
+            }
+            isActive -> {
+                fileLabel.font = fileLabel.font.deriveFont(Font.BOLD)
+                fileLabel.foreground = UIUtil.getTreeSelectionForeground()
+            }
+            isModified -> {
+                fileLabel.font = fileLabel.font.deriveFont(Font.BOLD)
+                fileLabel.foreground = JBColor(Color(0, 120, 0), Color(120, 200, 120)) // Green for modified
+            }
+            else -> {
+                fileLabel.font = fileLabel.font.deriveFont(Font.PLAIN)
+            }
         }
         
-        // Make clickable to open file
-        fileLabel.addMouseListener(object : MouseAdapter() {
+        filePanel_inner.add(fileLabel)
+
+        val mouseHandler = object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 if (e.button == MouseEvent.BUTTON1) {
                     FileEditorManager.getInstance(fileInfo.project).openFile(fileInfo.file, true)
+                }
+
+                if (e.button == MouseEvent.BUTTON3) {
+                    FileEditorManager.getInstance(fileInfo.project).closeFile(fileInfo.file)
                 }
             }
             
@@ -386,15 +487,35 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
                     filePanel.background = UIUtil.getListBackground()
                 }
             }
-        })
+        }
         
-        filePanel.add(fileLabel, BorderLayout.CENTER)
+        fileLabel.addMouseListener(mouseHandler)
+        filePanel.addMouseListener(mouseHandler)  // Also add to panel for better UX
         
-        // Close button
+        filePanel.add(filePanel_inner, BorderLayout.CENTER)
+        
+        // Close button - transparent and subtle
         val closeButton = JButton("×")
         closeButton.toolTipText = TabsPerProjectBundle.message("tooltip.closeFile")
         closeButton.preferredSize = Dimension(16, 16)
         closeButton.font = closeButton.font.deriveFont(10f)
+        closeButton.isOpaque = false
+        closeButton.isBorderPainted = false
+        closeButton.isContentAreaFilled = false
+        closeButton.isFocusPainted = false
+        closeButton.foreground = JBColor.GRAY
+        closeButton.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        
+        // Add hover effect for close button
+        closeButton.addMouseListener(object : MouseAdapter() {
+            override fun mouseEntered(e: MouseEvent) {
+                closeButton.foreground = JBColor.RED
+            }
+            override fun mouseExited(e: MouseEvent) {
+                closeButton.foreground = JBColor.GRAY
+            }
+        })
+        
         closeButton.addActionListener {
             FileEditorManager.getInstance(fileInfo.project).closeFile(fileInfo.file)
         }
@@ -480,6 +601,73 @@ class TabsPerProjectPanel(private val project: Project) : SimpleToolWindowPanel(
         }
         
         return cleanName
+    }
+    
+    /**
+     * Truncates text to fit within the available width, adding ellipsis if needed
+     */
+    private fun truncateText(text: String, font: Font, availableWidth: Int): String {
+        if (availableWidth <= 0) return text
+        
+        val metrics = contentPanel.getFontMetrics(font)
+        val textWidth = metrics.stringWidth(text)
+        
+        if (textWidth <= availableWidth) {
+            return text
+        }
+        
+        val ellipsis = "..."
+        val ellipsisWidth = metrics.stringWidth(ellipsis)
+        val availableForText = availableWidth - ellipsisWidth
+        
+        if (availableForText <= 0) return ellipsis
+        
+        var truncated = text
+        while (truncated.isNotEmpty() && metrics.stringWidth(truncated) > availableForText) {
+            truncated = truncated.substring(0, truncated.length - 1)
+        }
+        
+        return if (truncated.isEmpty()) ellipsis else truncated + ellipsis
+    }
+}
+
+// Custom label that truncates text with ellipsis and shows full text on hover
+private class TruncatingLabel(private val fullText: String, fullTooltip: String) : JBLabel() {
+    
+    init {
+        text = fullText
+        toolTipText = fullTooltip
+    }
+    
+    override fun paintComponent(g: Graphics) {
+        val metrics = g.fontMetrics
+        val availableWidth = width - insets.left - insets.right
+        
+        if (availableWidth > 0) {
+            val textWidth = metrics.stringWidth(fullText)
+            
+            if (textWidth > availableWidth) {
+                // Text needs truncation
+                val ellipsis = "..."
+                val ellipsisWidth = metrics.stringWidth(ellipsis)
+                val availableForText = availableWidth - ellipsisWidth
+                
+                if (availableForText > 0) {
+                    var truncated = fullText
+                    while (truncated.isNotEmpty() && metrics.stringWidth(truncated) > availableForText) {
+                        truncated = truncated.substring(0, truncated.length - 1)
+                    }
+                    text = if (truncated.isEmpty()) ellipsis else truncated + ellipsis
+                } else {
+                    text = ellipsis
+                }
+            } else {
+                // Text fits, show full text
+                text = fullText
+            }
+        }
+        
+        super.paintComponent(g)
     }
 }
 

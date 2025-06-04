@@ -49,7 +49,6 @@ class TabsPerProjectStartupActivity : ProjectActivity {
             val anchor = when (settings.toolWindowPosition) {
                 "left" -> ToolWindowAnchor.LEFT
                 "bottom" -> ToolWindowAnchor.BOTTOM
-                "top" -> ToolWindowAnchor.TOP
                 else -> ToolWindowAnchor.RIGHT
             }
             toolWindow.setAnchor(anchor, null)
