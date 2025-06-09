@@ -5,6 +5,10 @@ A JetBrains plugin that groups open editor tabs by project in a convenient tool 
 <!-- Plugin description -->
 This plugin helps you organize your open files by grouping them according to their project. Perfect for developers working with multiple projects simultaneously in IntelliJ IDEA, WebStorm, Rider, and other JetBrains IDEs.
 
+![JetBrains Plugin Downloads](https://img.shields.io/jetbrains/plugin/d/27536)
+![JetBrains Plugin Version](https://img.shields.io/jetbrains/plugin/v/27536)
+
+
 ## Features
 
 - **Current window focus**: Shows only files from the current project window, not all open projects
